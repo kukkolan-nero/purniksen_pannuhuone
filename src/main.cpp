@@ -80,7 +80,7 @@ void setup() {
     lcd.setCursor(0, ++lcdRivi);
     if (debugMode) {
       Serial.print("Anturi 1: osoite: ");
-      printAddress(pannuhuone);
+      printAddress(alaputki);
       Serial.println();
     }
   }
