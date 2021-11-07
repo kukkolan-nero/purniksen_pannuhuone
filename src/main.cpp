@@ -106,7 +106,7 @@ void setup() {
   
   anturit.begin();
 
-  wifi.begin(115200);
+  wifi.begin(9600);
   if (debugMode) Serial.println("WIFI: Odotetaan sarjaporttia.");
   while (!wifi) {}
   if (debugMode) Serial.println("WIFI: Sarjaporttia ok.");
