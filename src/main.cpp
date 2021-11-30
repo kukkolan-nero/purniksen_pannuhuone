@@ -9,10 +9,10 @@
 #define LCD_ROWS 4 // LCD-näytössä rivien määrä ...
 #define LCD_COLS 20 // ... ja riville mahtuvien merkkien määrä
 
-#define LAMPOANTURIT_PIN 10 // Dallas DS18xx(x)
-#define DEBUG_PIN 9 // DEBUG_PIN-painikkeen pinni
-#define ALARAJA_PIN 21
-#define YLARAJA_PIN 20
+#define LAMPOANTURIT_PIN 49 // Dallas DS18xx(x)
+#define DEBUG_PIN 47 // DEBUG_PIN-painikkeen pinni
+#define ALARAJA_PIN 69
+#define YLARAJA_PIN 68
 #define WIFI_RX_PIN 7
 #define WIFI_TX_PIN 6
 #define WIFI_DH_CP 5
