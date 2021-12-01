@@ -10,12 +10,13 @@
 #define LCD_COLS 20 // ... ja riville mahtuvien merkkien määrä
 
 #define LAMPOANTURIT_PIN 49 // Dallas DS18xx(x)
-#define DEBUG_PIN 47 // DEBUG_PIN-painikkeen pinni
-#define ALARAJA_PIN 69
-#define YLARAJA_PIN 68
-#define WIFI_RX_PIN 7
-#define WIFI_TX_PIN 6
-#define WIFI_DH_CP 5
+#define DEBUG_BTN_PIN 47 // DEBUG-painikkeen pinni
+#define DEBUG_LED_PIN 46 // DEBUG-ledin pinni
+#define ALARAJA_PIN A14
+#define YLARAJA_PIN A15
+//#define WIFI_RX_PIN 7
+//#define WIFI_TX_PIN 6
+#define WIFI_DH_CP 51
 
 // Hystereesin rajat lämpövastuksen käytölle, ADC_BITIT = Arduinon muunnostarkkuus
 #define LAMPOTILAN_ALARAJA 2
@@ -53,8 +54,8 @@ boolean debugMode = false;
 boolean vastusPaalla = false; // Lämpövastuksen tila
 float lampoPannuhuone = -99.9; // Pannuhuoneen ilman lämpötila
 float lampoAlaputki = -99.9; // Varaajan alaputken lämpötila
-int ylaraja = 99999; // Alaputken lämpötilan yläraja, jolloin vastus sammutetaan
-int alaraja = 9999; // Alaputken lämpötilan alaraja, jolloin vastus laitetaan päälle
+int ylaraja = 999; // Alaputken lämpötilan yläraja, jolloin vastus sammutetaan
+int alaraja = 999; // Alaputken lämpötilan alaraja, jolloin vastus laitetaan päälle
 char lcdStr[LCD_COLS]; // Yksi LCD-näytölle tulostettava rivi
 char lampoStr[7];
 
@@ -64,7 +65,7 @@ OneWire anturivayla(LAMPOANTURIT_PIN);
 DallasTemperature anturit(&anturivayla);
 DeviceAddress pannuhuone, alaputki;
 
-SoftwareSerial wifi(WIFI_RX_PIN, WIFI_TX_PIN);
+//oftwareSerial wifi(WIFI_RX_PIN, WIFI_TX_PIN);
 
 
 // Asteen symboli LCD-näytöllä
@@ -84,8 +85,13 @@ void printAddress(DeviceAddress deviceAddress)
 void setup() {
   byte lcdRivi = 0;
   
-  if (digitalRead(DEBUG_PIN))
+  pinMode(DEBUG_LED_PIN, OUTPUT);
+  digitalWrite(DEBUG_LED_PIN, LOW);
+
+  if (digitalRead(DEBUG_BTN_PIN)) {
     debugMode = true;
+    digitalWrite(DEBUG_LED_PIN, HIGH);
+  }
     
   Serial.begin(9600);
 
@@ -93,7 +99,7 @@ void setup() {
     Serial.println("pinMode:t");
   pinMode(ALARAJA_PIN, INPUT);
   pinMode(YLARAJA_PIN, INPUT);
-  pinMode(DEBUG_PIN, INPUT);
+  pinMode(DEBUG_BTN_PIN, INPUT);
   pinMode(LAMPOANTURIT_PIN, INPUT);
   pinMode(WIFI_DH_CP, OUTPUT);
   digitalWrite(WIFI_DH_CP, LOW);
@@ -102,15 +108,14 @@ void setup() {
   lcd.backlight();
   lcd.createChar(0, aste);
   lcd.clear();
-  lcd.print("PURNIKSEN PANNUHUONE");
-  lcd.setCursor(0, ++lcdRivi);
   if (debugMode) {
-    lcd.print("Debug_PIN-tila paalla");
+    lcd.print("Debug-tila paalla");
     lcd.setCursor(0, ++lcdRivi);
     Serial.println("PURNIKSEN PANNUHUONE");
-    Serial.println("Debug_PIN-tila paalla");
+    Serial.println("Debug-tila paalla");
   }
-  
+  lcd.print("PURNIKSEN PANNUHUONE");
+  lcd.setCursor(0, ++lcdRivi);
   anturit.begin();
 
   if (!anturit.getAddress(pannuhuone, 0)) {
@@ -154,9 +159,10 @@ void setup() {
   if (debugMode) Serial.println("WIFI: CH_PD ylös");
   digitalWrite(WIFI_DH_CP, HIGH);
 
-  wifi.begin(9600);
+  // Wifi-moduulin (ESP8266) alustus
+  Serial1.begin(115200);
   if (debugMode) Serial.println("WIFI: Odotetaan sarjaporttia.");
-  while (!wifi) {}
+  while (!Serial1) {}
   if (debugMode) Serial.println("WIFI: Sarjaporttia ok.");
 
   delay(2000);
@@ -204,14 +210,14 @@ float muunnaLampotilaksi(int tulonArvo)
 }
 
 void pollaaWifi() {
-  while (wifi.available()) {
-    char a = wifi.read();
+  while (Serial1.available()) {
+    char a = Serial1.read();
     Serial.print(a);
   }
   while (Serial.available()) {
     char a = Serial.read();
     Serial.write(a);
-    wifi.write(a);
+    Serial1.write(a);
   }
 
 }
