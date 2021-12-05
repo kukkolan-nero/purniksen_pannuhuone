@@ -2,10 +2,11 @@
 #include <OneWire.h>
 #include <LiquidCrystal_I2C.h>
 #include <DallasTemperature.h>
-#include <SoftwareSerial.h>
+#include <string.h>
+//#include <SoftwareSerial.h>
 
-#define LCD_SDA_PIN 18 // LCD-näytöt I2C-väylään
-#define LCD_SCL_PIN 19
+#define LCD_SDA_PIN 20 // LCD-näytöt I2C-väylään
+#define LCD_SCL_PIN 21
 #define LCD_ROWS 4 // LCD-näytössä rivien määrä ...
 #define LCD_COLS 20 // ... ja riville mahtuvien merkkien määrä
 
@@ -17,6 +18,8 @@
 //#define WIFI_RX_PIN 7
 //#define WIFI_TX_PIN 6
 #define WIFI_DH_CP 51
+#define WIFI_OK_LED_PIN 48 // Wifi-yhteys kunnossa LED
+#define SARJAPUSKURIN_KOKO 64
 
 // Hystereesin rajat lämpövastuksen käytölle, ADC_BITIT = Arduinon muunnostarkkuus
 #define LAMPOTILAN_ALARAJA 2
@@ -50,7 +53,7 @@
 // Montako millisekuntia sitten lämpötilaa pyydettiin viimeksi?
 unsigned long lastTempRequest = 0;
 
-boolean debugMode = false;
+boolean debugTila = false;
 boolean vastusPaalla = false; // Lämpövastuksen tila
 float lampoPannuhuone = -99.9; // Pannuhuoneen ilman lämpötila
 float lampoAlaputki = -99.9; // Varaajan alaputken lämpötila
@@ -58,6 +61,8 @@ int ylaraja = 999; // Alaputken lämpötilan yläraja, jolloin vastus sammutetaa
 int alaraja = 999; // Alaputken lämpötilan alaraja, jolloin vastus laitetaan päälle
 char lcdStr[LCD_COLS]; // Yksi LCD-näytölle tulostettava rivi
 char lampoStr[7];
+char* merkkijono; // Sarjaporteista saatavat vastaukset / data luetaan tähän merkkijonoon.
+boolean wifiOK = false; // Vastaako wifi-moduuli AT-komentoon?
 
 LiquidCrystal_I2C lcd(0x27, LCD_COLS, LCD_ROWS);
 
@@ -66,7 +71,6 @@ DallasTemperature anturit(&anturivayla);
 DeviceAddress pannuhuone, alaputki;
 
 //oftwareSerial wifi(WIFI_RX_PIN, WIFI_TX_PIN);
-
 
 // Asteen symboli LCD-näytöllä
 uint8_t aste[8] = {0b00111, 0b00101, 0b00111, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000};
@@ -82,33 +86,111 @@ void printAddress(DeviceAddress deviceAddress)
   }
 }
 
+void lueSarjaportti(Stream &portti) {
+  if (debugTila)
+    Serial.println(">>> lueSarjaportti");
+
+  // Oletusarvoisesti kaikkiin portteihin liikennöidään AT-komennoin, ja vastaus loppuu merkkiin '\r'.
+
+  int pos = 0;
+  char merkki;
+  char *pMerkkijono = merkkijono;
+
+  while ( (pMerkkijono - merkkijono) >= (SARJAPUSKURIN_KOKO-1) ) {
+    if (portti.available()) {
+      merkki = portti.read();
+  
+      if (debugTila)
+        Serial.print(merkki);
+
+      *pMerkkijono++ = merkki;
+
+      if (merkki == '\r')
+        break;
+    } // portti.available()
+  } // while
+  *pMerkkijono--;
+  *pMerkkijono = '\0';
+}
+
+void kirjoitaSarjaporttiin(Stream &portti, char *tmpStr) {
+  if (debugTila)
+    Serial.println(">>> kirjoitaSarjaporttiin");
+
+  int pituus = strlen(tmpStr);
+  int pos = 0;
+
+  while ( (pos < pituus) && (pos < SARJAPUSKURIN_KOKO - 1) ) {
+    portti.write(tmpStr[pos]);
+    if (debugTila)
+      Serial.write(tmpStr[pos]);
+    ++pos;
+  }
+  portti.print("\r\n");
+  if (debugTila)
+    Serial.println(" ");
+
+  delay(500);
+}
+
+boolean onksWifii(Stream portti) {
+  if (debugTila)
+    Serial.println(">>> onksWifii");
+
+  kirjoitaSarjaporttiin(portti, "ATE0");
+  delay(1000);
+  lueSarjaportti(portti);
+
+  if (strstr(merkkijono, "OK") != NULL) {
+    digitalWrite(WIFI_OK_LED_PIN, HIGH);
+    return true;
+  }
+  else {
+    digitalWrite(WIFI_OK_LED_PIN, LOW);
+    return false;
+  }
+}
+
+
 void setup() {
   byte lcdRivi = 0;
+
+  Serial.begin(9600);
+
+  merkkijono = (char*)calloc(SARJAPUSKURIN_KOKO, sizeof(char));
+  if (debugTila)
+    Serial.println("Varataan muistia: merkkijono");
+
+  if (merkkijono == NULL) {
+    lcd.print("!CALLOC: merkkijono");
+    lcd.setCursor(0, lcdRivi++);
+    if (debugTila)
+      Serial.println("Muistin varaaminen ei onnistunut: merkkijono");
+  }
   
   pinMode(DEBUG_LED_PIN, OUTPUT);
   digitalWrite(DEBUG_LED_PIN, LOW);
 
   if (digitalRead(DEBUG_BTN_PIN)) {
-    debugMode = true;
+    debugTila = true;
     digitalWrite(DEBUG_LED_PIN, HIGH);
   }
-    
-  Serial.begin(9600);
 
-  if (debugMode)
+  if (debugTila)
     Serial.println("pinMode:t");
   pinMode(ALARAJA_PIN, INPUT);
   pinMode(YLARAJA_PIN, INPUT);
   pinMode(DEBUG_BTN_PIN, INPUT);
   pinMode(LAMPOANTURIT_PIN, INPUT);
   pinMode(WIFI_DH_CP, OUTPUT);
+  pinMode(WIFI_OK_LED_PIN, OUTPUT);
   digitalWrite(WIFI_DH_CP, LOW);
   
   lcd.init();
   lcd.backlight();
   lcd.createChar(0, aste);
   lcd.clear();
-  if (debugMode) {
+  if (debugTila) {
     lcd.print("Debug-tila paalla");
     lcd.setCursor(0, ++lcdRivi);
     Serial.println("PURNIKSEN PANNUHUONE");
@@ -119,13 +201,13 @@ void setup() {
   anturit.begin();
 
   if (!anturit.getAddress(pannuhuone, 0)) {
-    if (debugMode) Serial.println("Anturi 0: Pannuhuone: Ei osoitetta");
+    if (debugTila) Serial.println("Anturi 0: Pannuhuone: Ei osoitetta");
     lcd.print("Anturi 0: No addr");
     lcd.setCursor(0, ++lcdRivi);
   } else {
     lcd.print("Anturi 0: ok");
     lcd.setCursor(0, ++lcdRivi);
-    if (debugMode) {
+    if (debugTila) {
       Serial.print("Anturi 0: Pannuhuone: osoite: ");
       printAddress(pannuhuone);
       Serial.println();
@@ -133,13 +215,13 @@ void setup() {
   }
 
   if (!anturit.getAddress(alaputki, 1)) {
-    if (debugMode) Serial.println("Anturi 1: Alaputki: Ei osoitetta");
+    if (debugTila) Serial.println("Anturi 1: Alaputki: Ei osoitetta");
     lcd.print("Anturi 1: No addr");
     lcd.setCursor(0, ++lcdRivi);
   } else {
     lcd.print("Anturi 1: ok");
     lcd.setCursor(0, ++lcdRivi);
-    if (debugMode) {
+    if (debugTila) {
       Serial.print("Anturi 1: Alaputki: osoite: ");
       printAddress(alaputki);
       Serial.println();
@@ -151,19 +233,26 @@ void setup() {
   anturit.setWaitForConversion(false);
   anturit.requestTemperatures();
   lastTempRequest = millis();
-  if (debugMode) {
+  if (debugTila) {
     Serial.print("lastTempRequest: ");
     Serial.println(lastTempRequest);
   }
   
-  if (debugMode) Serial.println("WIFI: CH_PD ylös");
+  if (debugTila) Serial.println("WIFI: CH_PD ylös");
   digitalWrite(WIFI_DH_CP, HIGH);
 
   // Wifi-moduulin (ESP8266) alustus
   Serial1.begin(115200);
-  if (debugMode) Serial.println("WIFI: Odotetaan sarjaporttia.");
+  if (debugTila) Serial.println("WIFI: Odotetaan sarjaporttia.");
   while (!Serial1) {}
-  if (debugMode) Serial.println("WIFI: Sarjaporttia ok.");
+  if (debugTila) Serial.println("WIFI: Sarjaportti ok.");
+
+  delay(1000);
+  wifiOK = onksWifii(Serial1);
+  if (debugTila) {
+    Serial.print("wifiOK: ");
+    Serial.println(wifiOK);
+  }
 
   delay(2000);
   lcd.clear();
@@ -175,6 +264,9 @@ void lcdAste() {
 }
 
 void lcdPaivita() {
+  if (debugTila)
+    Serial.println(">>> lcdPaivita");
+
   lcd.setCursor(0, 0);
   dtostrf(lampoPannuhuone, 6, 1, lampoStr);
   strcpy(lcdStr, "Pannuhuone: ");
@@ -209,17 +301,19 @@ float muunnaLampotilaksi(int tulonArvo)
   return KULMAKERROIN * tulonArvo + VAKIOTERMI;
 }
 
-void pollaaWifi() {
-  while (Serial1.available()) {
-    char a = Serial1.read();
+void pollaaWifi(Stream &portti) {
+  if (debugTila)
+    Serial.println(">>> pollaaWIFI");
+
+  while (portti.available()) {
+    char a = portti.read();
     Serial.print(a);
   }
   while (Serial.available()) {
     char a = Serial.read();
-    Serial.write(a);
-    Serial1.write(a);
+    Serial.print(a);
+    portti.print(a);
   }
-
 }
 
 void loop() {
@@ -235,7 +329,7 @@ void loop() {
     anturit.requestTemperatures();
     lastTempRequest = millis();
 
-    if (debugMode) {
+    if (debugTila) {
       Serial.print("lampoPannuhuone: ");
       Serial.println(lampoPannuhuone);
       Serial.print("lampoAlaputki: ");
@@ -248,7 +342,7 @@ void loop() {
   alaraja = muunnaLampotilaksi(analogRead(ALARAJA_PIN));
   ylaraja = muunnaLampotilaksi(analogRead(YLARAJA_PIN));
 
-  if (debugMode)  {
+  if (debugTila)  {
     Serial.print("Alaraja: ");
     Serial.println(alaraja);
     Serial.print("Ylaraja: ");
@@ -260,5 +354,5 @@ void loop() {
 
   lcdPaivita();
 
-  pollaaWifi();
+  pollaaWifi(Serial1);
 }
