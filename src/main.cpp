@@ -71,7 +71,10 @@ OneWire anturivayla(LAMPOANTURIT_PIN);
 DallasTemperature anturit(&anturivayla);
 DeviceAddress pannuhuone, alaputki;
 
-//oftwareSerial wifi(WIFI_RX_PIN, WIFI_TX_PIN);
+//SoftwareSerial wifi(WIFI_RX_PIN, WIFI_TX_PIN);
+HardwareSerial *sarjaPorttiWifi = &Serial1;
+HardwareSerial *sarjaPorttiGSM = &Serial2;
+HardwareSerial *sarjaPorttiLoRa = &Serial3;
 
 // Asteen symboli LCD-näytöllä
 uint8_t aste[8] = {0b00111, 0b00101, 0b00111, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000};
@@ -93,13 +96,20 @@ void pollaaSarjaportti(Stream &portti) {
   
   while (portti.available()) {
     char a = portti.read();
-    Serial.print(a);
+    Serial.print(a);    
+    /*
+      if (debugTila)
+      Serial.print(a);
+    */
   }
-  while (Serial.available()) {
-    char a = Serial.read();
-    Serial.print(a);
-    portti.print(a);
-  }
+  //if (debugTila) {
+    while (Serial.available()) {
+      char a = Serial.read();
+      Serial.print(a);
+      portti.print(a);
+    }
+    //Serial.println(" ");
+  //}
 }
 
 void lueSarjaportti(Stream &portti) {
@@ -123,8 +133,10 @@ void lueSarjaportti(Stream &portti) {
       *(merkkijono+pos) = merkki;
       pos++;
 
-      if (merkki == '\r')
-        break;
+      /*
+        if (merkki == '\r')
+          break;
+      */
     } // if portti
 
     if (millis() - timeout > SARJAPORTIN_TIMEOUT)
@@ -149,18 +161,18 @@ void kirjoitaSarjaporttiin(Stream &portti, char *tmpStr) {
   }
   portti.print("\r\n");
   if (debugTila)
-    Serial.println(" ");
+    Serial.print("\r\n");
 
   delay(500);
 }
 
-boolean onksWifii() {
+boolean onksOK(Stream &portti) {
   if (debugTila)
-    Serial.println(">>> onksWifii");
+    Serial.println(">>> onksOK");
 
-  kirjoitaSarjaporttiin(Serial1, "ATE0");
+  kirjoitaSarjaporttiin(portti, "ATE0");
   delay(1000);
-  lueSarjaportti(Serial1);
+  lueSarjaportti(portti);
 
   if (strstr(merkkijono, "OK") != NULL) {
     digitalWrite(WIFI_OK_LED_PIN, HIGH);
@@ -177,6 +189,12 @@ void setup() {
   byte lcdRivi = 0;
 
   Serial.begin(9600);
+  while (!Serial) {}
+
+  if (debugTila) {
+    Serial.println("PURNIKSEN PANNUHUONE");
+    Serial.println("Debug-tila paalla");
+  }
 
   merkkijono = (char*)calloc(SARJAPUSKURIN_KOKO, sizeof(char));
   if (debugTila)
@@ -214,8 +232,6 @@ void setup() {
   if (debugTila) {
     lcd.print("Debug-tila paalla");
     lcd.setCursor(0, ++lcdRivi);
-    Serial.println("PURNIKSEN PANNUHUONE");
-    Serial.println("Debug-tila paalla");
   }
   lcd.print("PURNIKSEN PANNUHUONE");
   lcd.setCursor(0, ++lcdRivi);
@@ -259,26 +275,27 @@ void setup() {
     Serial.println(lastTempRequest);
   }
   
-  if (debugTila) Serial.println("WIFI: CH_PD ylös");
-  digitalWrite(WIFI_DH_CP, HIGH);
-
   // Wifi-moduulin (ESP8266) alustus
-  Serial1.begin(115200);
+  sarjaPorttiWifi->begin(115200);
   if (debugTila) Serial.println("WIFI: Odotetaan sarjaporttia.");
-  while (!Serial1) {}
+  while (!sarjaPorttiWifi) {}
   if (debugTila) Serial.println("WIFI: Sarjaportti ok.");
   delay(500);
+
+  if (debugTila) Serial.println("WIFI: CH_PD ylös");
+  digitalWrite(WIFI_DH_CP, HIGH);
+  delay(1000);
 
   /*
     ESP8266-moduuli lähettää aluksi yleensä aina jonkin epämääräisen merkkijonon.
     Poimitaan roskat pois.
   */
-  kirjoitaSarjaporttiin(Serial1, "AT");
+  kirjoitaSarjaporttiin(*sarjaPorttiWifi, "AT");
   delay(500);
-  pollaaSarjaportti(Serial1);
+  pollaaSarjaportti(*sarjaPorttiWifi);
 
   // Testataan kulkevatko AT-komennot. onksWifii kääntää myös WIFI_OK -ledin päälle tai pois.
-  wifiOK = onksWifii();
+  wifiOK = onksOK(*sarjaPorttiWifi);
   if (debugTila) {
     Serial.print("wifiOK: ");
     Serial.println(wifiOK);
@@ -369,5 +386,5 @@ void loop() {
 
   lcdPaivita();
 
-  pollaaSarjaportti(Serial1);
+  pollaaSarjaportti(*sarjaPorttiWifi);
 }
