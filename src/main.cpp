@@ -20,6 +20,7 @@
 #define WIFI_DH_CP 51
 #define WIFI_OK_LED_PIN 48 // Wifi-yhteys kunnossa LED
 #define SARJAPUSKURIN_KOKO 64
+#define SARJAPORTIN_TIMEOUT 2000 // Timeout millisekunteina
 
 // Hystereesin rajat lämpövastuksen käytölle, ADC_BITIT = Arduinon muunnostarkkuus
 #define LAMPOTILAN_ALARAJA 2
@@ -86,7 +87,24 @@ void printAddress(DeviceAddress deviceAddress)
   }
 }
 
+void pollaaSarjaportti(Stream &portti) {
+  if (debugTila)
+    Serial.println(">>> pollaaSarjaportti");
+  
+  while (portti.available()) {
+    char a = portti.read();
+    Serial.print(a);
+  }
+  while (Serial.available()) {
+    char a = Serial.read();
+    Serial.print(a);
+    portti.print(a);
+  }
+}
+
 void lueSarjaportti(Stream &portti) {
+  unsigned long timeout = millis();
+
   if (debugTila)
     Serial.println(">>> lueSarjaportti");
 
@@ -94,23 +112,26 @@ void lueSarjaportti(Stream &portti) {
 
   int pos = 0;
   char merkki;
-  char *pMerkkijono = merkkijono;
 
-  while ( (pMerkkijono - merkkijono) >= (SARJAPUSKURIN_KOKO-1) ) {
+  while (pos <= SARJAPUSKURIN_KOKO - 1) {
     if (portti.available()) {
       merkki = portti.read();
-  
+
       if (debugTila)
         Serial.print(merkki);
 
-      *pMerkkijono++ = merkki;
+      *(merkkijono+pos) = merkki;
+      pos++;
 
       if (merkki == '\r')
         break;
-    } // portti.available()
-  } // while
-  *pMerkkijono--;
-  *pMerkkijono = '\0';
+    } // if portti
+
+    if (millis() - timeout > SARJAPORTIN_TIMEOUT)
+      break;
+
+  } // while pos
+  *(merkkijono+pos) = '\0';  
 }
 
 void kirjoitaSarjaporttiin(Stream &portti, char *tmpStr) {
@@ -133,13 +154,13 @@ void kirjoitaSarjaporttiin(Stream &portti, char *tmpStr) {
   delay(500);
 }
 
-boolean onksWifii(Stream portti) {
+boolean onksWifii() {
   if (debugTila)
     Serial.println(">>> onksWifii");
 
-  kirjoitaSarjaporttiin(portti, "ATE0");
+  kirjoitaSarjaporttiin(Serial1, "ATE0");
   delay(1000);
-  lueSarjaportti(portti);
+  lueSarjaportti(Serial1);
 
   if (strstr(merkkijono, "OK") != NULL) {
     digitalWrite(WIFI_OK_LED_PIN, HIGH);
@@ -246,9 +267,18 @@ void setup() {
   if (debugTila) Serial.println("WIFI: Odotetaan sarjaporttia.");
   while (!Serial1) {}
   if (debugTila) Serial.println("WIFI: Sarjaportti ok.");
+  delay(500);
 
-  delay(1000);
-  wifiOK = onksWifii(Serial1);
+  /*
+    ESP8266-moduuli lähettää aluksi yleensä aina jonkin epämääräisen merkkijonon.
+    Poimitaan roskat pois.
+  */
+  kirjoitaSarjaporttiin(Serial1, "AT");
+  delay(500);
+  pollaaSarjaportti(Serial1);
+
+  // Testataan kulkevatko AT-komennot. onksWifii kääntää myös WIFI_OK -ledin päälle tai pois.
+  wifiOK = onksWifii();
   if (debugTila) {
     Serial.print("wifiOK: ");
     Serial.println(wifiOK);
@@ -301,21 +331,6 @@ float muunnaLampotilaksi(int tulonArvo)
   return KULMAKERROIN * tulonArvo + VAKIOTERMI;
 }
 
-void pollaaWifi(Stream &portti) {
-  if (debugTila)
-    Serial.println(">>> pollaaWIFI");
-
-  while (portti.available()) {
-    char a = portti.read();
-    Serial.print(a);
-  }
-  while (Serial.available()) {
-    char a = Serial.read();
-    Serial.print(a);
-    portti.print(a);
-  }
-}
-
 void loop() {
   /*
     millis() on unsigned long -tyyppiä ja pyörähtää ympäri n. 50 vrk:n kuluttua.
@@ -354,5 +369,5 @@ void loop() {
 
   lcdPaivita();
 
-  pollaaWifi(Serial1);
+  pollaaSarjaportti(Serial1);
 }
